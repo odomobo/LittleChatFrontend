@@ -1143,6 +1143,11 @@ MESSAGE RECOVERY:
         }
         
         function deleteLastMessage() {
+			// Do nothing if currently generating
+            if (isGenerating()) {
+                return;
+            }
+			
             // First clear all error messages
             const errorMessages = document.querySelectorAll('.message.error');
             errorMessages.forEach(el => el.remove());
