@@ -22,7 +22,6 @@ aims to be both thorough and concise - thoroughly describing design decisions an
 architecture while staying organized and minimal. Every section should serve a clear 
 purpose in understanding the system.
 
-
 ═══════════════════════════════════════════════════════════════════════════════
 2. SYSTEM OVERVIEW
 ═══════════════════════════════════════════════════════════════════════════════
@@ -632,6 +631,15 @@ MESSAGE RECOVERY:
             line-height: 1.4;
         }
         
+        .protocol-warning a {
+            color: #ffd966;
+            text-decoration: underline;
+        }
+        
+        .protocol-warning a:hover {
+            color: #ffe699;
+        }
+        
         .range-value {
             display: inline-block;
             margin-left: 10px;
@@ -728,7 +736,7 @@ MESSAGE RECOVERY:
                     <label>API Endpoint</label>
                     <input type="text" id="apiEndpoint" placeholder="https://api.example.com/v1/chat/completions" oninput="checkProtocolMismatch()" />
                     <div class="protocol-warning" id="protocolWarning" style="display: none;">
-                        ⚠️ Protocol mismatch: HTTPS page cannot connect to HTTP endpoints due to browser security. Download this HTML file and open it locally.
+                        ⚠️ Protocol mismatch: HTTPS page cannot connect to HTTP endpoints due to browser security. <a href="" download>Download this page</a> and open it locally.
                     </div>
                 </div>
                 
