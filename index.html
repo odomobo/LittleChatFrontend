@@ -74,7 +74,7 @@ STRUCTURE (DESKTOP):
 │      │   ├─ API Key                             │
 │      │   ├─ API Endpoint                        │
 │      │   ├─ Model                               │
-│      │   └─ Clear Chat button                   │
+│      │   └─ Delete Last Message button          │
 │      └─ Generation Settings                     │
 │          ├─ Temperature                         │
 │          ├─ Max Tokens                          │
@@ -144,6 +144,9 @@ RESPONSIVE DESIGN:
 - Sidebar state controlled by .sidebar-open class on body
 - CSS transforms handle sidebar slide animation
 - Hamburger icon changes to X when sidebar open
+- Mobile viewport: uses interactive-widget=resizes-content meta tag for proper keyboard handling
+- Mobile layout: sidebar uses position: absolute (relative to container) instead of fixed positioning
+- Body height: uses 100dvh with 100vh fallback for proper mobile viewport adaptation
 
 CONVERSATION HISTORY:
 - DOM is the single source of truth - no separate conversationHistory array
@@ -191,14 +194,19 @@ User message recovery:
 - On streaming errors with partial response: messages kept in history for context
 
 USER INTERACTION:
-- Enter key: Checks isGenerating() AND input content - only sends when idle AND input has content
-- Shift+Enter: Always creates new line in textarea
+- Enter key behavior (platform-specific):
+  - Desktop: Checks isGenerating() AND input content - only sends when idle AND input has content
+  - Mobile: Always creates new line (must use Send button to send)
+  - Detection via touch support (ontouchstart or maxTouchPoints)
+- Shift+Enter: Always creates new line in textarea (all platforms)
 - Button with content: Sends message (standard behavior)
 - Button with empty input: Requests continuation (generates assistant message without user message)
 - Stop button: Must be explicitly clicked (Enter won't trigger it during generation)
 - Multiple rapid clicks: Naturally handles abort + restart (no special logic needed)
-- Input auto-clears on send (if message was provided), auto-focuses after completion
+- Input auto-clears on send (if message was provided)
+- Input auto-focuses after completion on desktop only (not on mobile to prevent unwanted keyboard)
 - Mobile hamburger: Toggles sidebar visibility, icon changes ☰ ↔ ✕
+- Delete Last Message: Clears errors, removes last user/assistant message, closes mobile sidebar
 
 NAVIGATION WARNING:
 - beforeunload event listener warns user before leaving page
@@ -284,6 +292,12 @@ toggleSidebar()
   - Called by: hamburger button click
   - Only functional on mobile (≤768px)
 
+isMobileDevice()
+  - Detects if device has touch support
+  - Checks for 'ontouchstart' in window or maxTouchPoints > 0
+  - Used to adjust behavior for mobile vs desktop (keyboard handling, auto-focus)
+  - Returns boolean
+
 UTILITY FUNCTIONS:
 
 autoGrowTextarea(textarea)
@@ -302,11 +316,11 @@ addMessage(role, content)
 
 handleKeyPress(event)
   - Intercepts Enter key in textarea
-  - Calls isGenerating() - if generating, does nothing
-  - Checks if input has content - if empty, does nothing
-  - If idle AND has content, calls handleSendButton()
-  - Shift+Enter always creates new line (default behavior)
-  - Prevents accidental empty continuations via keyboard
+  - Platform-specific behavior via isMobileDevice():
+    - Desktop: Calls isGenerating(), checks input content, sends if idle AND has content
+    - Mobile: Does nothing (allows default newline behavior)
+  - Shift+Enter always creates new line (default behavior) on all platforms
+  - Prevents accidental sends and allows natural multi-line input on mobile
 
 saveSettings() / window.onload
   - Persists/restores: apiKey, apiEndpoint, model
@@ -315,26 +329,31 @@ saveSettings() / window.onload
   - Does NOT save mobile sidebar state
   - Also sets up beforeunload warning on page load
 
-clearChat()
-  - Clears .messages innerHTML
-  - Focuses input textarea
-  - No confirmation, no separate state cleanup needed
+deleteLastMessage()
+  - Clears all error messages first
+  - Finds and removes the last user or assistant message
+  - Does nothing if no messages exist
+  - Closes mobile sidebar (removes sidebar-open class)
+  - No visual feedback or confirmation
 
 updateRangeValue(id, value)
   - Updates temperature display span
   - Called by range input's oninput event
 
 KEY INTERACTIONS:
-- handleKeyPress() → checks content → handleSendButton() (only when idle AND has content)
+- handleKeyPress() → checks platform and content → handleSendButton() (desktop: only when idle AND has content, mobile: never)
 - handleSendButton() → abort OR sendMessage() (based on state, ignores input content)
 - sendMessage() validates BEFORE changing state (prevents stuck UI)
 - sendMessage() conditionally creates userMessageDiv (null for continuations)
 - sendMessage() → streamAPI() → getConversationHistory()
 - sendMessage() captures userMessageDiv reference for potential recovery (can be null)
 - sendMessage() creates assistant div, passes to streamAPI() for progressive updates
+- sendMessage() auto-focuses input only on desktop (via isMobileDevice check)
 - streamAPI() throws on error, caught by sendMessage() for cleanup
 - AbortController created in sendMessage(), passed to streamAPI(), triggered by handleSendButton()
 - toggleSidebar() modifies body class, CSS handles visual transition
+- deleteLastMessage() clears errors, removes last message, closes mobile sidebar
+- isMobileDevice() used by handleKeyPress() and sendMessage() for platform-specific behavior
 - beforeunload event warns user before leaving page with conversation
 
 
@@ -371,19 +390,25 @@ STYLING DECISIONS:
 - Mobile header: fixed at top, hamburger on left
 - Mobile sidebar: 90% width overlay with slide-in animation
 - Responsive breakpoint: 768px (mobile below, desktop above)
+- Body height: 100vh with 100dvh override for proper mobile viewport handling
 
 RESPONSIVE BEHAVIOR:
 Desktop (>768px):
 - .mobile-header { display: none }
 - .sidebar always visible, no overlay
 - Body class .sidebar-open has no effect
+- Enter key sends messages
 
 Mobile (≤768px):
 - .mobile-header { display: flex }
-- .sidebar positioned fixed, translated off-screen by default
+- .sidebar positioned absolute within container (not fixed to viewport)
 - .sidebar-open class on body brings sidebar into view
 - Sidebar overlay at 90% width with semi-transparent backdrop
 - Hamburger icon rotates/transforms ☰ → ✕ via CSS
+- Viewport meta tag includes interactive-widget=resizes-content for proper keyboard handling
+- Container position: relative for absolute sidebar positioning
+- Enter key creates newlines (must use Send button)
+- Input does not auto-focus after generation (prevents unwanted keyboard)
 
 FIELD VALIDATION:
 - Endpoint: required (shows error if missing)
