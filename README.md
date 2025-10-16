@@ -1,0 +1,1 @@
+LittleChat Frontend is a simple single-page static HTML UI which can be used for chatting with LLMs.
