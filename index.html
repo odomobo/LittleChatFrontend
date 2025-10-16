@@ -621,6 +621,17 @@ MESSAGE RECOVERY:
             background: #5a5a5a;
         }
         
+        .protocol-warning {
+            background: #4a3a1a;
+            border: 1px solid #6a5a2a;
+            color: #f0d090;
+            padding: 8px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-top: 8px;
+            line-height: 1.4;
+        }
+        
         .range-value {
             display: inline-block;
             margin-left: 10px;
@@ -715,7 +726,10 @@ MESSAGE RECOVERY:
                 
                 <div>
                     <label>API Endpoint</label>
-                    <input type="text" id="apiEndpoint" placeholder="https://api.example.com/v1/chat/completions" />
+                    <input type="text" id="apiEndpoint" placeholder="https://api.example.com/v1/chat/completions" oninput="checkProtocolMismatch()" />
+                    <div class="protocol-warning" id="protocolWarning" style="display: none;">
+                        ⚠️ Protocol mismatch: HTTPS page cannot connect to HTTP endpoints due to browser security. Download this HTML file and open it locally.
+                    </div>
                 </div>
                 
                 <div>
@@ -784,7 +798,35 @@ MESSAGE RECOVERY:
                 if (settings.apiEndpoint) document.getElementById('apiEndpoint').value = settings.apiEndpoint;
                 if (settings.model) document.getElementById('model').value = settings.model;
             }
+            // Check protocol mismatch on load
+            checkProtocolMismatch();
         };
+        
+        function checkProtocolMismatch() {
+            const endpoint = document.getElementById('apiEndpoint').value.trim();
+            const warning = document.getElementById('protocolWarning');
+            
+            if (!endpoint) {
+                warning.style.display = 'none';
+                return;
+            }
+            
+            try {
+                const endpointUrl = new URL(endpoint);
+                const pageProtocol = window.location.protocol; // 'https:' or 'http:'
+                const endpointProtocol = endpointUrl.protocol; // 'https:' or 'http:'
+                
+                // Show warning if protocols don't match (and not file://)
+                if (pageProtocol !== 'file:' && pageProtocol !== endpointProtocol) {
+                    warning.style.display = 'block';
+                } else {
+                    warning.style.display = 'none';
+                }
+            } catch (e) {
+                // Invalid URL, hide warning
+                warning.style.display = 'none';
+            }
+        }
         
         // Save settings
         function saveSettings() {
