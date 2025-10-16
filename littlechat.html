@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<!--
+LittleChat Frontend - Architecture Documentation
+
+═══════════════════════════════════════════════════════════════════════════════
+1. DESIGN PHILOSOPHY
+═══════════════════════════════════════════════════════════════════════════════
+
+This is a single-page chat interface designed for SIMPLICITY and TRANSPARENCY over 
+efficiency. The core principle: UI state IS the application state.
+
+What you see is what you get:
+- Conversation history is the DOM, not a separate data structure
+- Button text ('Send' vs 'Stop') indicates system state
+- Partial messages from stopped generation stay visible and in history
+- No hidden state, no synchronization issues
+
+DOCUMENTATION PHILOSOPHY:
+This documentation is a living document that must always be kept in sync with the 
+code. Any code changes require corresponding documentation updates. The documentation 
+aims to be both thorough and concise - thoroughly describing design decisions and 
+architecture while staying organized and minimal. Every section should serve a clear 
+purpose in understanding the system.
+
+APPLICATION NAME:
+This application file is named "littlechat.html" and must stay named
+as such when being updated.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+2. SYSTEM OVERVIEW
+═══════════════════════════════════════════════════════════════════════════════
+
+PURPOSE:
+Single-page frontend for OpenAI-compatible chat completion APIs with streaming.
+Built exclusively for custom endpoints. API key is optional and visible.
+
+SYSTEM STATES:
+┌─────────┐    sendMessage()     ┌────────────┐
+│  IDLE   │ ───────────────────> │ GENERATING │
+│         │ <─────────────────── │            │
+└─────────┘   complete/abort     └────────────┘
+     ^                                  │
+     │                                  │ error occurs
+     │ clearErrors()                    v
+     │                            ┌──────────┐
+     └──────────────────────────  │ ERRORED  │
+                                  └──────────┘
+
+State Indicators:
+- IDLE: Button text = 'Send', no abort controller, no error messages visible
+- GENERATING: Button text = 'Stop', abort controller exists, assistant div present
+- ERRORED: Button text = 'Send', error message visible in chat, no abort controller
+
+Transitions:
+- idle → generating: User sends message OR requests continuation (empty input)
+- generating → idle: Stream completes OR user stops generation
+- generating → errored: API error during streaming
+- errored → idle: User sends new message (auto-clears errors)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+3. DOM ARCHITECTURE
+═══════════════════════════════════════════════════════════════════════════════
+
+STRUCTURE (DESKTOP):
+┌─────────────────────────────────────────────────┐
+│ .container (no header)                          │
+│  ├─ .chat-area                                  │
+│  │   ├─ .messages (flex column)                 │
+│  │   │   ├─ .message.user                       │
+│  │   │   ├─ .message.assistant                  │
+│  │   │   ├─ .message.assistant (continuation)   │
+│  │   │   ├─ .message.error                      │
+│  │   │   └─ ...                                 │
+│  │   └─ .input-area (textarea + button)         │
+│  └─ .sidebar (always visible)                   │
+│      ├─ Connection Settings                     │
+│      │   ├─ API Key                             │
+│      │   ├─ API Endpoint                        │
+│      │   ├─ Model                               │
+│      │   └─ Clear Chat button                   │
+│      └─ Generation Settings                     │
+│          ├─ Temperature                         │
+│          ├─ Max Tokens                          │
+│          └─ System Prompt                       │
+└─────────────────────────────────────────────────┘
+
+STRUCTURE (MOBILE):
+┌─────────────────────────────────────────────────┐
+│ .mobile-header (hamburger menu ☰/✕)            │
+├─────────────────────────────────────────────────┤
+│ .container                                      │
+│  ├─ .chat-area                                  │
+│  │   └─ (same as desktop)                       │
+│  └─ .sidebar (overlay, toggleable)              │
+│      ├─ (same as desktop)                       │
+│      └─ (covers ~90% of screen width)           │
+└─────────────────────────────────────────────────┘
+
+Mobile behavior:
+- Header only visible below 768px breakpoint
+- Sidebar starts open on page load (mobile only)
+- Hamburger toggles to X when sidebar is open
+- Sidebar overlays chat area at ~90% width
+- Clicking X closes sidebar to reveal chat
+- Actions in sidebar keep it open (user must close explicitly)
+
+MESSAGE CLASSIFICATION:
+- .message.user: User's input (blue tint, right-aligned, max-width 85%)
+- .message.assistant: AI responses (gray border, left-aligned, max-width 85%)
+  - Can appear consecutively when continuation is requested via empty send
+- .message.error: Error messages (red tint, center-aligned, italic, auto-cleared on next send)
+
+CONVERSATION HISTORY EXTRACTION:
+getConversationHistory() queries all .message elements and builds array:
+- Include: .message.user → {role: 'user', content: textContent}
+- Include: .message.assistant → {role: 'assistant', content: textContent}
+- Exclude: .message.error (errors don't go in history)
+- System prompt is prepended to this array per-request, not stored in DOM
+
+
+═══════════════════════════════════════════════════════════════════════════════
+4. KEY ARCHITECTURAL DECISIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+API INTEGRATION:
+- Custom endpoints only - no hardcoded providers or defaults
+- OpenAI-compatible chat completion API format
+- Authorization header only added if API key provided
+- Model and max_tokens only sent if values exist (no defaults)
+- Streaming via fetch ReadableStream + Server-Sent Events (SSE)
+- SSE parsing: split on \n, parse lines starting with "data: "
+- Handles [DONE] signal and empty lines gracefully
+- AbortController enables mid-stream cancellation
+
+STATE MANAGEMENT:
+- Button text content ('Send' vs 'Stop') is PRIMARY state indicator
+- Helper functions isGenerating() and setGenerating() encapsulate state checks/changes
+- currentAbortController tracks active request (null when idle)
+- No boolean flags like isStreaming or isLoading
+- Settings persisted to localStorage (apiKey, apiEndpoint, model only)
+- Mobile sidebar state NOT persisted - always starts open on page load
+
+RESPONSIVE DESIGN:
+- 768px breakpoint for mobile vs desktop
+- Desktop (>768px): No header, sidebar always visible
+- Mobile (≤768px): Header with hamburger, sidebar toggleable overlay
+- Sidebar state controlled by .sidebar-open class on body
+- CSS transforms handle sidebar slide animation
+- Hamburger icon changes to X when sidebar open
+
+CONVERSATION HISTORY:
+- DOM is the single source of truth - no separate conversationHistory array
+- Rebuilt from DOM on every API call via getConversationHistory()
+- System prompt is ephemeral - prepended per request, never persisted
+- Partial messages (from stopped generation) automatically preserved in DOM
+- Clear chat just clears DOM innerHTML - no separate state to manage
+- Supports back-to-back assistant messages via empty input continuation
+
+EMPTY INPUT HANDLING:
+Two different behaviors for empty input:
+1. Button click with empty input: Triggers generation without adding user message
+   - Allows requesting continuation/back-to-back assistant messages
+   - Uses existing conversation history from DOM
+   - Creates only assistant message div
+2. Enter key with empty input: Does nothing (no-op)
+   - Enter is a convenience shortcut that requires content
+   - Prevents accidental empty generations
+   - Shift+Enter still creates newlines normally
+
+This dual behavior provides:
+- Explicit control via button (can request continuation)
+- Convenient shortcut via Enter (typical send behavior)
+- Clear UX: button = power user feature, Enter = standard chat behavior
+
+ERROR HANDLING:
+Three error types with different behaviors:
+1. Missing endpoint: Immediate return, show error, stay in idle state, user message stays in textarea
+2. AbortError: Silent handling, keep partial message, return to idle
+3. Real errors: 
+   - If assistant div is EMPTY: remove assistant div
+     - If userMessageDiv exists: remove it and restore message to textarea
+     - If no userMessageDiv (continuation): just remove empty assistant div
+   - If assistant div has CONTENT: keep both messages (partial response preserved), show error
+
+Error clearing:
+- Auto-cleared at start of sendMessage() via querySelectorAll('.message.error')
+- Forces user to see error before it disappears
+- No confirmation dialogs or persistent error state
+
+User message recovery:
+- On validation errors: message never leaves textarea
+- On streaming errors with no response from user message: user message restored to textarea from DOM
+- On streaming errors with no response from continuation: no restoration needed (no user message)
+- On streaming errors with partial response: messages kept in history for context
+
+USER INTERACTION:
+- Enter key: Checks isGenerating() AND input content - only sends when idle AND input has content
+- Shift+Enter: Always creates new line in textarea
+- Button with content: Sends message (standard behavior)
+- Button with empty input: Requests continuation (generates assistant message without user message)
+- Stop button: Must be explicitly clicked (Enter won't trigger it during generation)
+- Multiple rapid clicks: Naturally handles abort + restart (no special logic needed)
+- Input auto-clears on send (if message was provided), auto-focuses after completion
+- Mobile hamburger: Toggles sidebar visibility, icon changes ☰ ↔ ✕
+
+STREAM PROCESSING:
+- TextDecoder with {stream: true} for proper multi-byte character handling
+- Buffer management: incomplete lines kept in buffer for next chunk
+- Content extraction from choices[0].delta.content path
+- Progressive DOM updates: append to textContent as tokens arrive
+- Auto-scroll on each update: scrollTop = scrollHeight
+
+
+═══════════════════════════════════════════════════════════════════════════════
+5. FUNCTION RESPONSIBILITIES
+═══════════════════════════════════════════════════════════════════════════════
+
+PRIMARY FUNCTIONS:
+
+isGenerating()
+  - Returns boolean indicating if system is currently generating
+  - Checks button text content ('Stop' = generating, 'Send' = idle)
+  - Used by: handleKeyPress(), handleSendButton()
+
+setGenerating(generating)
+  - Sets the generating state by updating button text and CSS classes
+  - If true: changes button to 'Stop' with .stop class
+  - If false: changes button to 'Send', removes .stop class
+  - Centralizes all button state changes
+  - Used by: sendMessage()
+
+handleSendButton()
+  - Router: uses isGenerating() to decide stop vs send
+  - If generating: calls currentAbortController.abort()
+  - If idle: calls sendMessage()
+  - Called by: button click, Enter key (only when idle AND input has content)
+
+sendMessage()
+  - Orchestrates entire send flow
+  - Clears errors first, then validates endpoint BEFORE any state changes
+  - If validation fails, shows error and returns (user message stays in textarea)
+  - If validation passes, proceeds with state changes:
+    - If message has content: creates user message div (captures reference as userMessageDiv)
+    - If message is empty: userMessageDiv remains null (continuation mode)
+    - Clears textarea only if message was provided
+    - Calls setGenerating(true)
+    - Sets up abort controller
+    - Creates empty assistant message div
+  - Calls streamAPI(), handles errors, manages finally block
+  - Error handling:
+    - AbortError: keeps partial message, no error shown
+    - Real error + empty assistant:
+      - Removes assistant div
+      - If userMessageDiv exists: removes it and restores message to textarea
+      - If no userMessageDiv (continuation): just removes empty assistant div
+    - Real error + content in assistant: keeps messages, shows error
+  - Calls setGenerating(false) in finally block to return to idle
+
+streamAPI(messageElement, signal)
+  - Handles all API communication
+  - Builds conversation history from DOM via getConversationHistory()
+  - Constructs request body with optional fields
+  - Performs fetch with abort signal
+  - Parses SSE stream chunk by chunk
+  - Updates messageElement.textContent progressively
+  - Returns full content (though currently unused)
+
+getConversationHistory()
+  - Queries all .message.user and .message.assistant elements
+  - Builds array of {role, content} objects
+  - Skips .message.error (error messages)
+  - Includes consecutive assistant messages (from continuations)
+  - Pure function: no side effects
+
+toggleSidebar()
+  - Toggles .sidebar-open class on body element
+  - Controls mobile sidebar visibility
+  - Updates hamburger icon (☰ ↔ ✕) via CSS
+  - Called by: hamburger button click
+  - Only functional on mobile (≤768px)
+
+UTILITY FUNCTIONS:
+
+autoGrowTextarea(textarea)
+  - Adjusts textarea height to fit content as user types
+  - Resets height to 'auto' then sets to scrollHeight
+  - Respects max-height constraint from CSS (300px)
+  - Called by: oninput event on userInput textarea
+  - Height reset to 'auto' when message is sent
+
+addMessage(role, content)
+  - Creates message div with appropriate classes
+  - Appends to .messages container
+  - Auto-scrolls to bottom
+  - Returns the created message div element
+  - Used for: user messages, error messages
+
+handleKeyPress(event)
+  - Intercepts Enter key in textarea
+  - Calls isGenerating() - if generating, does nothing
+  - Checks if input has content - if empty, does nothing
+  - If idle AND has content, calls handleSendButton()
+  - Shift+Enter always creates new line (default behavior)
+  - Prevents accidental empty continuations via keyboard
+
+saveSettings() / window.onload
+  - Persists/restores: apiKey, apiEndpoint, model
+  - localStorage key: 'littleChatFrontendSettings'
+  - Does NOT save temperature, max_tokens, system prompt
+  - Does NOT save mobile sidebar state
+
+clearChat()
+  - Clears .messages innerHTML
+  - Focuses input textarea
+  - No confirmation, no separate state cleanup needed
+
+updateRangeValue(id, value)
+  - Updates temperature display span
+  - Called by range input's oninput event
+
+KEY INTERACTIONS:
+- handleKeyPress() → checks content → handleSendButton() (only when idle AND has content)
+- handleSendButton() → abort OR sendMessage() (based on state, ignores input content)
+- sendMessage() validates BEFORE changing state (prevents stuck UI)
+- sendMessage() conditionally creates userMessageDiv (null for continuations)
+- sendMessage() → streamAPI() → getConversationHistory()
+- sendMessage() captures userMessageDiv reference for potential recovery (can be null)
+- sendMessage() creates assistant div, passes to streamAPI() for progressive updates
+- streamAPI() throws on error, caught by sendMessage() for cleanup
+- AbortController created in sendMessage(), passed to streamAPI(), triggered by handleSendButton()
+- toggleSidebar() modifies body class, CSS handles visual transition
+
+
+═══════════════════════════════════════════════════════════════════════════════
+6. IMPLEMENTATION DETAILS
+═══════════════════════════════════════════════════════════════════════════════
+
+SETTINGS PERSISTENCE:
+- Saved on every send (not on field change)
+- Loaded only on page load (window.onload)
+- Stored as JSON object in localStorage
+- Only persists: apiKey, apiEndpoint, model
+- Runtime settings (temperature, max_tokens, system prompt) not saved
+- Mobile sidebar state not saved (always starts open)
+
+STREAM BUFFER MANAGEMENT:
+- buffer variable accumulates incomplete lines
+- Split on \n, keep last item (incomplete line) in buffer
+- Handles multi-byte UTF-8 characters via decoder {stream: true}
+- Each complete line parsed independently
+
+AUTO-SCROLLING:
+- Triggered on addMessage() and during streaming
+- Uses messagesDiv.scrollTop = messagesDiv.scrollHeight
+- Keeps latest content visible as it arrives
+
+STYLING DECISIONS:
+- Dark theme: #1a1a1a background, #2a2a2a panels, #e0e0e0 text
+- Messages: max-width 85%, pre-wrap for line breaks
+- Button transition: smooth color change green ↔ red
+- Temperature: range input (0-2, step 0.1) with live value display
+- Input textarea: auto-grows as user types (via JavaScript), max-height 300px, min-height 60px
+- System prompt textarea: manually resizable vertically, min-height 100px
+- Mobile header: fixed at top, hamburger on left
+- Mobile sidebar: 90% width overlay with slide-in animation
+- Responsive breakpoint: 768px (mobile below, desktop above)
+
+RESPONSIVE BEHAVIOR:
+Desktop (>768px):
+- .mobile-header { display: none }
+- .sidebar always visible, no overlay
+- Body class .sidebar-open has no effect
+
+Mobile (≤768px):
+- .mobile-header { display: flex }
+- .sidebar positioned fixed, translated off-screen by default
+- .sidebar-open class on body brings sidebar into view
+- Sidebar overlay at 90% width with semi-transparent backdrop
+- Hamburger icon rotates/transforms ☰ → ✕ via CSS
+
+FIELD VALIDATION:
+- Endpoint: required (shows error if missing)
+- API key: optional (header omitted if empty)
+- Model: optional (field omitted from body if empty)
+- Max tokens: optional (field omitted from body if empty)
+- User input: can be empty (allows continuation), .trim() check determines if user message created
+- Validation happens BEFORE any UI state changes to prevent stuck states
+
+CONVERSATION CONTEXT:
+- No message editing or deletion capability
+- No conversation export/import
+- Clear chat is destructive with no confirmation
+- System prompt added fresh on each request, never appears in message history
+- Conversation persists only in DOM (lost on page refresh)
+- Supports multi-turn conversations with consecutive assistant messages
+
+MESSAGE RECOVERY:
+- User messages are captured as DOM elements via addMessage() return value (can be null)
+- On streaming errors with empty assistant response:
+  1. Assistant div is removed
+  2. If userMessageDiv exists (not a continuation):
+     a. User message retrieved from DOM via textContent
+     b. Restored to textarea
+     c. Removed from DOM
+  3. If userMessageDiv is null (was continuation): just remove empty assistant div
+- This ensures user doesn't lose their input when API calls fail before generating any content
+- When partial content exists, all messages are preserved for context
+- Continuation failures don't affect textarea (it's already empty)
+
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LittleChat Frontend</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .mobile-header {
+            display: none;
+            background: #2a2a2a;
+            padding: 15px 20px;
+            border-bottom: 1px solid #3a3a3a;
+            align-items: center;
+            justify-content: flex-end;
+        }
+        
+        .hamburger {
+            background: none;
+            border: none;
+            color: #e0e0e0;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 5px;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .message {
+            padding: 12px 16px;
+            border-radius: 8px;
+            max-width: 85%;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        
+        .message.user {
+            background: #2a4a6a;
+            align-self: flex-end;
+        }
+        
+        .message.assistant {
+            background: #2a2a2a;
+            align-self: flex-start;
+            border: 1px solid #3a3a3a;
+        }
+        
+        .message.error {
+            background: #3a2a2a;
+            align-self: center;
+            font-style: italic;
+            font-size: 14px;
+            max-width: 95%;
+        }
+        
+        .input-area {
+            padding: 15px 20px;
+            background: #2a2a2a;
+            border-top: 1px solid #3a3a3a;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .input-area textarea {
+            flex: 1;
+            background: #1a1a1a;
+            border: 1px solid #3a3a3a;
+            color: #e0e0e0;
+            padding: 10px;
+            border-radius: 4px;
+            resize: none;
+            font-family: inherit;
+            font-size: 14px;
+            min-height: 60px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .input-area button {
+            background: #4a7c4a;
+            border: none;
+            color: white;
+            padding: 10px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        
+        .input-area button:hover:not(:disabled) {
+            background: #5a8c5a;
+        }
+        
+        .input-area button.stop {
+            background: #c44444;
+        }
+        
+        .input-area button.stop:hover:not(:disabled) {
+            background: #d45454;
+        }
+        
+        .input-area button:disabled {
+            background: #3a3a3a;
+            cursor: not-allowed;
+        }
+        
+        .sidebar {
+            width: 320px;
+            background: #2a2a2a;
+            border-left: 1px solid #3a3a3a;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+        
+        .sidebar-section {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .sidebar-section h3 {
+            font-size: 16px;
+            margin-bottom: 5px;
+            color: #b0b0b0;
+        }
+        
+        .sidebar label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 13px;
+            color: #b0b0b0;
+        }
+        
+        .sidebar input[type="text"],
+        .sidebar input[type="number"],
+        .sidebar input[type="range"] {
+            width: 100%;
+            background: #1a1a1a;
+            border: 1px solid #3a3a3a;
+            color: #e0e0e0;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .sidebar textarea {
+            width: 100%;
+            background: #1a1a1a;
+            border: 1px solid #3a3a3a;
+            color: #e0e0e0;
+            padding: 10px;
+            border-radius: 4px;
+            resize: vertical;
+            font-family: inherit;
+            font-size: 13px;
+            min-height: 100px;
+        }
+        
+        .sidebar button {
+            background: #4a4a4a;
+            border: none;
+            color: #e0e0e0;
+            padding: 10px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            width: 100%;
+        }
+        
+        .sidebar button:hover {
+            background: #5a5a5a;
+        }
+        
+        .range-value {
+            display: inline-block;
+            margin-left: 10px;
+            color: #4a7c4a;
+            font-weight: 600;
+        }
+        
+        .error {
+            background: #6a2a2a !important;
+            border-color: #8a3a3a !important;
+        }
+        
+        /* Mobile styles */
+        @media (max-width: 768px) {
+            body {
+                overflow: hidden;
+            }
+            
+            .mobile-header {
+                display: flex;
+            }
+            
+            .container {
+                position: relative;
+            }
+            
+            .sidebar {
+                position: fixed;
+                top: 61px; /* Below header */
+                right: 0;
+                bottom: 0;
+                width: 90%;
+                z-index: 1000;
+                transform: translateX(100%);
+                transition: transform 0.3s ease;
+                border-left: none;
+                box-shadow: -2px 0 10px rgba(0, 0, 0, 0.5);
+            }
+            
+            .sidebar-open .sidebar {
+                transform: translateX(0);
+            }
+            
+            .sidebar-open .container::before {
+                content: '';
+                position: fixed;
+                top: 61px; /* Below header */
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.3);
+                z-index: 999;
+            }
+            
+            /* Hamburger to X animation */
+            .hamburger {
+                position: relative;
+            }
+            
+            .hamburger::before {
+                content: '☰';
+            }
+            
+            .sidebar-open .hamburger::before {
+                content: '✕';
+            }
+        }
+    </style>
+</head>
+<body class="sidebar-open">
+    <div class="mobile-header">
+        <button class="hamburger" onclick="toggleSidebar()" aria-label="Toggle menu"></button>
+    </div>
+    
+    <div class="container">
+        <div class="chat-area">
+            <div class="messages" id="messages"></div>
+            <div class="input-area">
+                <textarea id="userInput" placeholder="Type your message..." onkeydown="handleKeyPress(event)" oninput="autoGrowTextarea(this)"></textarea>
+                <button id="sendBtn" onclick="handleSendButton()">Send</button>
+            </div>
+        </div>
+        
+        <div class="sidebar">
+            <div class="sidebar-section">
+                <h3>Connection Settings</h3>
+                
+                <div>
+                    <label>API Key (optional)</label>
+                    <input type="text" id="apiKey" placeholder="sk-..." />
+                </div>
+                
+                <div>
+                    <label>API Endpoint</label>
+                    <input type="text" id="apiEndpoint" placeholder="https://api.example.com/v1/chat/completions" />
+                </div>
+                
+                <div>
+                    <label>Model</label>
+                    <input type="text" id="model" placeholder="gpt-4" />
+                </div>
+                
+                <button onclick="clearChat()">Clear Chat</button>
+            </div>
+            
+            <div class="sidebar-section">
+                <h3>Generation Settings</h3>
+                
+                <div>
+                    <label>Temperature <span class="range-value" id="tempValue">0.7</span></label>
+                    <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7" oninput="updateRangeValue('tempValue', this.value)" />
+                </div>
+                
+                <div>
+                    <label>Max Tokens</label>
+                    <input type="number" id="maxTokens" placeholder="Leave empty for default" min="1" max="100000" />
+                </div>
+                
+                <div>
+                    <label>System Prompt (optional)</label>
+                    <textarea id="systemPrompt" placeholder="You are a helpful assistant..."></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentAbortController = null;
+        
+        function isGenerating() {
+            const sendBtn = document.getElementById('sendBtn');
+            return sendBtn.textContent === 'Stop';
+        }
+        
+        function setGenerating(generating) {
+            const sendBtn = document.getElementById('sendBtn');
+            if (generating) {
+                sendBtn.textContent = 'Stop';
+                sendBtn.classList.add('stop');
+            } else {
+                sendBtn.textContent = 'Send';
+                sendBtn.classList.remove('stop');
+            }
+        }
+        
+        function toggleSidebar() {
+            document.body.classList.toggle('sidebar-open');
+        }
+        
+        function autoGrowTextarea(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = textarea.scrollHeight + 'px';
+        }
+        
+        // Load saved settings
+        window.onload = () => {
+            const saved = localStorage.getItem('littleChatFrontendSettings');
+            if (saved) {
+                const settings = JSON.parse(saved);
+                if (settings.apiKey) document.getElementById('apiKey').value = settings.apiKey;
+                if (settings.apiEndpoint) document.getElementById('apiEndpoint').value = settings.apiEndpoint;
+                if (settings.model) document.getElementById('model').value = settings.model;
+            }
+        };
+        
+        // Save settings
+        function saveSettings() {
+            const settings = {
+                apiKey: document.getElementById('apiKey').value,
+                apiEndpoint: document.getElementById('apiEndpoint').value,
+                model: document.getElementById('model').value
+            };
+            localStorage.setItem('littleChatFrontendSettings', JSON.stringify(settings));
+        }
+        
+        function updateRangeValue(id, value) {
+            document.getElementById(id).textContent = value;
+        }
+        
+        function addMessage(role, content) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            messageDiv.textContent = content;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            return messageDiv;
+        }
+        
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                if (!isGenerating()) {
+                    const userInput = document.getElementById('userInput');
+                    if (userInput.value.trim()) {
+                        handleSendButton();
+                    }
+                }
+            }
+        }
+        
+        function handleSendButton() {
+            if (isGenerating()) {
+                if (currentAbortController) {
+                    currentAbortController.abort();
+                }
+            } else {
+                sendMessage();
+            }
+        }
+        
+        function getConversationHistory() {
+            const messageElements = document.querySelectorAll('.messages .message');
+            const history = [];
+            
+            messageElements.forEach(msg => {
+                if (msg.classList.contains('user')) {
+                    history.push({ role: 'user', content: msg.textContent });
+                } else if (msg.classList.contains('assistant')) {
+                    history.push({ role: 'assistant', content: msg.textContent });
+                }
+            });
+            
+            return history;
+        }
+        
+        async function sendMessage() {
+            const userInput = document.getElementById('userInput');
+            const message = userInput.value.trim();
+            
+            const errorMessages = document.querySelectorAll('.message.error');
+            errorMessages.forEach(el => el.remove());
+            
+            const apiEndpoint = document.getElementById('apiEndpoint').value;
+            
+            if (!apiEndpoint) {
+                addMessage('error', 'Please configure API Endpoint in the sidebar.');
+                return;
+            }
+            
+            saveSettings();
+            
+            let userMessageDiv = null;
+            if (message) {
+                userMessageDiv = addMessage('user', message);
+                userInput.value = '';
+                userInput.style.height = 'auto';
+            }
+            
+            setGenerating(true);
+            
+            currentAbortController = new AbortController();
+            
+            const messagesDiv = document.getElementById('messages');
+            const assistantMessageDiv = document.createElement('div');
+            assistantMessageDiv.className = 'message assistant';
+            messagesDiv.appendChild(assistantMessageDiv);
+            
+            try {
+                await streamAPI(assistantMessageDiv, currentAbortController.signal);
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    // Generation stopped - keep partial message
+                } else {
+                    if (!assistantMessageDiv.textContent.trim()) {
+                        assistantMessageDiv.remove();
+                        
+                        if (userMessageDiv) {
+                            userInput.value = userMessageDiv.textContent;
+                            userMessageDiv.remove();
+                            autoGrowTextarea(userInput);
+                        }
+                    }
+                    addMessage('error', `Error: ${error.message}`);
+                }
+            } finally {
+                setGenerating(false);
+                currentAbortController = null;
+                userInput.focus();
+            }
+        }
+        
+        async function streamAPI(messageElement, signal) {
+            const apiKey = document.getElementById('apiKey').value;
+            const apiEndpoint = document.getElementById('apiEndpoint').value;
+            const model = document.getElementById('model').value;
+            const temperature = parseFloat(document.getElementById('temperature').value);
+            const maxTokens = parseInt(document.getElementById('maxTokens').value);
+            const systemPrompt = document.getElementById('systemPrompt').value;
+            
+            let messages = getConversationHistory();
+            
+            if (systemPrompt) {
+                messages = [{ role: 'system', content: systemPrompt }, ...messages];
+            }
+            
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            
+            if (apiKey) {
+                headers['Authorization'] = `Bearer ${apiKey}`;
+            }
+            
+            const body = {
+                messages: messages,
+                temperature: temperature,
+                stream: true
+            };
+            
+            if (model) {
+                body.model = model;
+            }
+            
+            if (maxTokens) {
+                body.max_tokens = maxTokens;
+            }
+            
+            const response = await fetch(apiEndpoint, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(body),
+                signal: signal
+            });
+            
+            if (!response.ok) {
+                const error = await response.text();
+                throw new Error(`API Error: ${response.status} - ${error}`);
+            }
+            
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let fullContent = '';
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                
+                buffer = lines.pop();
+                
+                for (const line of lines) {
+                    if (line.trim() === '') continue;
+                    if (line.trim() === 'data: [DONE]') continue;
+                    
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const jsonStr = line.slice(6);
+                            const data = JSON.parse(jsonStr);
+                            const content = data.choices[0]?.delta?.content;
+                            
+                            if (content) {
+                                fullContent += content;
+                                messageElement.textContent = fullContent;
+                                
+                                const messagesDiv = document.getElementById('messages');
+                                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                            }
+                        } catch (e) {
+                            console.error('Error parsing SSE:', e, line);
+                        }
+                    }
+                }
+            }
+            
+            return fullContent;
+        }
+        
+        function clearChat() {
+            document.getElementById('messages').innerHTML = '';
+            document.getElementById('userInput').focus();
+        }
+    </script>
+</body>
+</html>
