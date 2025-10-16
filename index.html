@@ -809,6 +809,10 @@ MESSAGE RECOVERY:
             textarea.style.height = textarea.scrollHeight + 'px';
         }
         
+        function isMobileDevice() {
+            return ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        }
+        
         // Load saved settings and set up beforeunload warning
         window.onload = () => {
             const saved = localStorage.getItem('littleChatFrontendSettings');
@@ -879,7 +883,7 @@ MESSAGE RECOVERY:
         }
         
         function handleKeyPress(event) {
-            if (event.key === 'Enter' && !event.shiftKey) {
+            if (event.key === 'Enter' && !event.shiftKey && !isMobileDevice()) {
                 event.preventDefault();
                 if (!isGenerating()) {
                     const userInput = document.getElementById('userInput');
