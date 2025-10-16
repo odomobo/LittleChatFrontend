@@ -469,6 +469,7 @@ MESSAGE RECOVERY:
             border-bottom: 1px solid #3a3a3a;
             align-items: center;
             justify-content: flex-end;
+            z-index: 100;
         }
         
         .hamburger {
@@ -506,6 +507,42 @@ MESSAGE RECOVERY:
             display: flex;
             flex-direction: column;
             gap: 15px;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .shadow-overlay-top {
+            height: 0;
+            position: relative;
+            z-index: 10;
+        }
+        
+        .shadow-overlay-top::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 12px;
+            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.2), transparent);
+            pointer-events: none;
+        }
+        
+        .shadow-overlay-bottom {
+            height: 0;
+            position: relative;
+            z-index: 10;
+        }
+        
+        .shadow-overlay-bottom::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 12px;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.2), transparent);
+            pointer-events: none;
         }
         
         .message {
@@ -541,6 +578,8 @@ MESSAGE RECOVERY:
             border-top: 1px solid #3a3a3a;
             display: flex;
             gap: 10px;
+            z-index: 50;
+            position: relative;
         }
         
         .input-area textarea {
@@ -596,6 +635,8 @@ MESSAGE RECOVERY:
             display: flex;
             flex-direction: column;
             gap: 25px;
+            z-index: 1000;
+            position: relative;
         }
         
         .sidebar-section {
@@ -753,7 +794,9 @@ MESSAGE RECOVERY:
     
     <div class="container">
         <div class="chat-area">
+            <div class="shadow-overlay-top"></div>
             <div class="messages" id="messages"></div>
+            <div class="shadow-overlay-bottom"></div>
             <div class="input-area">
                 <textarea id="userInput" placeholder="Type your message..." onkeydown="handleKeyPress(event)" oninput="autoGrowTextarea(this)"></textarea>
                 <button id="sendBtn" onclick="handleSendButton()">Send</button>
