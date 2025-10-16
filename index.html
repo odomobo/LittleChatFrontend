@@ -200,6 +200,14 @@ USER INTERACTION:
 - Input auto-clears on send (if message was provided), auto-focuses after completion
 - Mobile hamburger: Toggles sidebar visibility, icon changes ☰ ↔ ✕
 
+NAVIGATION WARNING:
+- beforeunload event listener warns user before leaving page
+- Prevents accidental loss of conversation history
+- Uses browser's native dialog (message cannot be customized due to security)
+- Warning shows for any page navigation, refresh, or tab close
+- No custom message possible - browsers show generic "changes may not be saved" text
+- Simple implementation: just preventDefault() on beforeunload event
+
 STREAM PROCESSING:
 - TextDecoder with {stream: true} for proper multi-byte character handling
 - Buffer management: incomplete lines kept in buffer for next chunk
@@ -305,6 +313,7 @@ saveSettings() / window.onload
   - localStorage key: 'littleChatFrontendSettings'
   - Does NOT save temperature, max_tokens, system prompt
   - Does NOT save mobile sidebar state
+  - Also sets up beforeunload warning on page load
 
 clearChat()
   - Clears .messages innerHTML
@@ -326,6 +335,7 @@ KEY INTERACTIONS:
 - streamAPI() throws on error, caught by sendMessage() for cleanup
 - AbortController created in sendMessage(), passed to streamAPI(), triggered by handleSendButton()
 - toggleSidebar() modifies body class, CSS handles visual transition
+- beforeunload event warns user before leaving page with conversation
 
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -797,7 +807,7 @@ MESSAGE RECOVERY:
             textarea.style.height = textarea.scrollHeight + 'px';
         }
         
-        // Load saved settings
+        // Load saved settings and set up beforeunload warning
         window.onload = () => {
             const saved = localStorage.getItem('littleChatFrontendSettings');
             if (saved) {
@@ -808,6 +818,12 @@ MESSAGE RECOVERY:
             }
             // Check protocol mismatch on load
             checkProtocolMismatch();
+            
+            // Warn before leaving page to prevent losing conversation
+            window.addEventListener('beforeunload', (e) => {
+                e.preventDefault();
+                e.returnValue = ''; // Required for Chrome
+            });
         };
         
         function checkProtocolMismatch() {
