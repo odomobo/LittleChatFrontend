@@ -323,9 +323,9 @@ handleKeyPress(event)
   - Prevents accidental sends and allows natural multi-line input on mobile
 
 saveSettings() / window.onload
-  - Persists/restores: apiKey, apiEndpoint, model
+  - Persists/restores: apiKey, apiEndpoint, model, temperature, maxTokens
   - localStorage key: 'littleChatFrontendSettings'
-  - Does NOT save temperature, max_tokens, system prompt
+  - Does NOT save system prompt
   - Does NOT save mobile sidebar state
   - Also sets up beforeunload warning on page load
 
@@ -365,8 +365,8 @@ SETTINGS PERSISTENCE:
 - Saved on every send (not on field change)
 - Loaded only on page load (window.onload)
 - Stored as JSON object in localStorage
-- Only persists: apiKey, apiEndpoint, model
-- Runtime settings (temperature, max_tokens, system prompt) not saved
+- Persists: apiKey, apiEndpoint, model, temperature, maxTokens
+- Does NOT persist: system prompt
 - Mobile sidebar state not saved (always starts open)
 
 STREAM BUFFER MANAGEMENT:
@@ -419,9 +419,9 @@ FIELD VALIDATION:
 - Validation happens BEFORE any UI state changes to prevent stuck states
 
 CONVERSATION CONTEXT:
-- No message editing or deletion capability
-- No conversation export/import
-- Clear chat is destructive with no confirmation
+- No message editing capability
+- Individual message deletion via "Delete Last Message" button
+- Delete Last Message: clears errors first, then removes last user/assistant message, closes mobile sidebar
 - System prompt added fresh on each request, never appears in message history
 - Conversation persists only in DOM (lost on page refresh)
 - Supports multi-turn conversations with consecutive assistant messages
@@ -846,6 +846,11 @@ MESSAGE RECOVERY:
                 if (settings.apiKey) document.getElementById('apiKey').value = settings.apiKey;
                 if (settings.apiEndpoint) document.getElementById('apiEndpoint').value = settings.apiEndpoint;
                 if (settings.model) document.getElementById('model').value = settings.model;
+                if (settings.temperature !== undefined) {
+                    document.getElementById('temperature').value = settings.temperature;
+                    document.getElementById('tempValue').textContent = settings.temperature;
+                }
+                if (settings.maxTokens) document.getElementById('maxTokens').value = settings.maxTokens;
             }
             // Check protocol mismatch on load
             checkProtocolMismatch();
@@ -888,7 +893,9 @@ MESSAGE RECOVERY:
             const settings = {
                 apiKey: document.getElementById('apiKey').value,
                 apiEndpoint: document.getElementById('apiEndpoint').value,
-                model: document.getElementById('model').value
+                model: document.getElementById('model').value,
+                temperature: document.getElementById('temperature').value,
+                maxTokens: document.getElementById('maxTokens').value
             };
             localStorage.setItem('littleChatFrontendSettings', JSON.stringify(settings));
         }
