@@ -757,7 +757,7 @@ MESSAGE RECOVERY:
                     <input type="text" id="model" placeholder="gpt-4" />
                 </div>
                 
-                <button onclick="clearChat()">Clear Chat</button>
+                <button onclick="deleteLastMessage()">Delete Last Message</button>
             </div>
             
             <div class="sidebar-section">
@@ -1061,9 +1061,21 @@ MESSAGE RECOVERY:
             return fullContent;
         }
         
-        function clearChat() {
-            document.getElementById('messages').innerHTML = '';
-            document.getElementById('userInput').focus();
+        function deleteLastMessage() {
+            // First clear all error messages
+            const errorMessages = document.querySelectorAll('.message.error');
+            errorMessages.forEach(el => el.remove());
+            
+            // Find all non-error messages
+            const messages = document.querySelectorAll('.message.user, .message.assistant');
+            
+            // Delete the last one if it exists
+            if (messages.length > 0) {
+                messages[messages.length - 1].remove();
+            }
+            
+            // Close sidebar on mobile
+            document.body.classList.remove('sidebar-open');
         }
     </script>
 </body>
