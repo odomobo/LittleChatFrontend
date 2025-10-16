@@ -971,7 +971,9 @@ MESSAGE RECOVERY:
             } finally {
                 setGenerating(false);
                 currentAbortController = null;
-                userInput.focus();
+                if (!isMobileDevice()) {
+                    userInput.focus();
+                }
             }
         }
         
